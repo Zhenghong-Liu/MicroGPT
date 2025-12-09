@@ -23,7 +23,7 @@ NUM_LAYERS = 12
 D_FF = D_MODEL * 4
 DROPOUT = 0.0
 
-DEVICE = torch.device("cpu")
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ==================== 自定义 CSS 样式 ====================
 st.markdown("""
