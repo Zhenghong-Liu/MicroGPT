@@ -6,177 +6,248 @@ import sys
 from model.microGPT import MicroGPT
 from utils.utils import sample_output
 
+# ==================== 模型配置 ====================
+MODEL_WEIGHTS_PATH = "./assert/micro_gpt_chat.pth"
+DATA_DIR = "./dataset"
 
-
-# 模型权重文件路径
-# MODEL_WEIGHTS_PATH = "./assert/micro_gpt_chat.pth"
-MODEL_WEIGHTS_PATH = "./assert/micro_gpt_chat_0_ing.pth"
-# MODEL_WEIGHTS_PATH = "./assert/micro_gpt_pretrain_1.pth"
-# 分词器 (Tokenizer) 所在目录
-# 注意：这应该与您训练时使用的 DATA_DIR 一致
-DATA_DIR = "/media/liuzh/data/DLData/minimind/"
-
-# microGPT 模型参数 (必须与训练时保持一致)
-VOCAB_SIZE = 6400 # 假设这是您的词汇表大小，如果模型未在训练时使用特殊标记，通常是这个值
+VOCAB_SIZE = 6400
 D_MODEL = 512
 NHEAD = 8
 NUM_LAYERS = 12
 D_FF = D_MODEL * 4
 DROPOUT = 0.0
 
-# 设置设备
-# DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEVICE = torch.device("cpu")
 
+# ==================== 自定义 CSS 样式 ====================
+st.markdown("""
+<style>
+    .main {
+        background-color: #0a0a0a;
+        color: #e0e0e0;
+        font-family: 'Segoe UI', sans-serif;
+    }
+    .title {
+        text-align: center;
+        font-size: 2.2em;
+        margin-bottom: 0.5em;
+        
+    }
+    .subtitle {
+        text-align: center;
+        font-size: 1.1em;
+        color: #999999;
+        margin-bottom: 1.5em;
+    }
+    .chat-container {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        padding: 1rem;
+        max-width: 800px;
+        margin: auto;
+    }
+    .message {
+        display: flex;
+        align-items: flex-start;
+        margin-bottom: 1rem;
+        max-width: 80%;
+    }
+    .user-message {
+        flex-direction: row-reverse;
+    }
+    
+    .message-text {
+        color: #333;
+        padding: 0.8rem 1rem;
+        border-radius: 12px;
+        line-height: 1.5;
+        word-wrap: break-word;
+    }
+    .user-message .message-text {
+        background-color: #e6f4ff;
+    }
+    .footer {
+        text-align: center;
+        color: #777;
+        font-size: 0.9em;
+        margin-top: 2rem;
+        opacity: 0.7;
+    }
+    .sidebar-title {
+        color: #ffffff;
+        margin-bottom: 0.5rem;
+    }
+    .slider-label {
+        color: #bbb;
+        font-size: 0.9em;
+    }
+    .btn-primary {
+        background-color: #4a4a4a;
+        color: white;
+        border: none;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 0.9em;
+    }
+    .btn-primary:hover {
+        background-color: #666;
+    }
+            
+    .avatar {
+        width: 40px;
+        height: 38px;
+        border-radius: 50%;
+        margin-right: 0.8rem;
+        margin-left: 1.0rem;
+        background-color: #000;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-size: 1.0em;
+        color: white;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 
-
+# ==================== 加载模型与分词器 ====================
 @st.cache_resource
 def load_model_and_tokenizer():
-    """在应用启动时加载模型和分词器"""
     try:
-        # 1. 加载分词器
         tokenizer = AutoTokenizer.from_pretrained(DATA_DIR)
-
-        # 2. 确定 VOCAB_SIZE
         global VOCAB_SIZE
         VOCAB_SIZE = len(tokenizer)
-        
-        # 3. 初始化模型
+
         model = MicroGPT(VOCAB_SIZE, D_MODEL, NHEAD, NUM_LAYERS, D_FF, DROPOUT)
-        
-        # 4. 加载权重
         state_dict = torch.load(MODEL_WEIGHTS_PATH, map_location='cpu')
         model.load_state_dict(state_dict)
-        
-        # 5. 迁移到设备并设置为 bfloat16 (与训练时保持一致)
         model = model.to(DEVICE, dtype=torch.bfloat16)
         model.eval()
 
-        st.success(f"✅ 模型 microGPT 和分词器加载成功，运行在 {DEVICE} 上。")
+        # st.success(f"✅ 模型加载成功，运行在 {DEVICE} 上。")
         return model, tokenizer
-        
     except Exception as e:
-        st.error(f"❌ 模型或分词器加载失败，请检查路径和模型参数！错误: {e}")
+        st.error(f"❌ 加载失败: {e}")
         st.stop()
-        
-# --- Streamlit 界面主体 ---
+
+# ==================== 主函数 ====================
 def main():
     st.set_page_config(
-        page_title="MicroGPT Chatbot",
-        page_icon="",
+        page_title="MicroGPT",
+        page_icon="🧠",
         layout="wide"
     )
 
+    # === 页面顶部标题与提示 ===
+    col1, col2, col3 = st.columns([1, 3, 1])
+    with col2:
+        st.markdown('<div class="title">你好，我是MicroGPT</div>', unsafe_allow_html=True)
+        st.markdown('<div class="subtitle">内容完全由AI生成，请务必仔细甄别<br>Content AI-generated, please discern with care</div>', unsafe_allow_html=True)
 
-    st.title("MicroGPT 对话界面")
-
-    # 提示词和信息组织
-    with st.expander("📝 示例提示词和使用说明", expanded=False):
-        st.markdown("""
-            欢迎使用 **MicroGPT** 模型聊天应用。
-            
-            - **模型参数:** 模型配置为 $D_{model}=512$, $N_{layers}=12$。
-            - **使用技巧:** 尝试在侧边栏调整 **温度** 和 **Top-K** 参数来观察生成结果的变化。
-            
-            **推荐示例:**
-            * “解释一下‘光合作用’的基本过程”
-            * “请用 Python 写一个计算斐波那契数列的函数”
-            * “如何才能更好地学习深度学习？”
-        """)
-
-    st.info(f"✨ 当前模型参数: **{D_MODEL}** 维度, **{NUM_LAYERS}** 层。")
-
-    # 1. 加载模型和分词器
-    model, tokenizer = load_model_and_tokenizer()
-
-    # 2. 侧边栏：参数设置
+    # === 侧边栏设置 ===
     with st.sidebar:
-        st.header("⚙️ 推理参数设置")
-        
-        # 温度 (Temperature) 滑块
+        st.markdown('<div class="sidebar-title">⚙️ 推理参数</div>', unsafe_allow_html=True)
         temperature = st.slider(
             "温度 (Temperature)",
             min_value=0.01,
             max_value=1.5,
             value=0.8,
             step=0.01,
-            help="控制生成文本的随机性。温度越高，结果越多样化（越随机）。"
+            help="控制生成随机性：越高越自由，越低越保守。"
         )
-
-        # Top-K 采样滑块
         top_k = st.slider(
             "Top-K",
             min_value=1,
-            max_value=100, # 最大值为词汇表大小
+            max_value=100,
             value=50,
             step=1,
-            help="限制模型只从概率最高的 K 个词中采样。K 越小，生成越保守。"
+            help="从概率最高的 K 个词中采样。"
         )
-
-        # 最大生成长度
         max_new_tokens = st.slider(
-            "最大生成长度 (Max New Tokens)",
+            "最大生成长度",
             min_value=10,
             max_value=512,
             value=256,
             step=10,
-            help="模型单次回答生成的最长 Token 数。"
+            help="模型一次最多生成多少 token。"
         )
-        
-        st.info("💡 **提示:** 更改参数后，新一轮对话将使用新参数。")
 
-    # 3. 对话历史初始化
+    # === 初始化模型 ===
+    if "model" not in st.session_state:
+        st.session_state.model, st.session_state.tokenizer = load_model_and_tokenizer()
+
+    # === 初始化对话历史 ===
     if "messages" not in st.session_state:
-        # 初始化对话历史，包含一个系统提示
         st.session_state.messages = [
-            {"role": "system", "content": "You are a helpful assistant"},
-            {"role": "assistant", "content": "你好！我是 MicroGPT，有什么可以帮您的吗？"}
+            {"role": "assistant", "content": "你好！我是一个大型语言模型，能够生成各种文本，包括故事、诗歌、代码、文章等。我的目标是帮助你解决问题、提供信息、娱乐等。"}
         ]
-        
-    # 4. 展示历史对话
-    # 过滤掉 "system" 角色，只展示用户和助手的消息
-    for message in st.session_state.messages:
-        if message["role"] in ["user", "assistant"]:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
 
-    # 5. 处理新的用户输入
-    if prompt := st.chat_input("请在这里输入您的问题..."):
-        # 将用户输入添加到历史记录
+    # === 展示对话历史 ===
+    st.markdown('<div class="chat-container">', unsafe_allow_html=True)
+    for msg in st.session_state.messages:
+        if msg["role"] == "assistant":
+            with st.container():
+                st.markdown(f'<div class="message"><div class="avatar">Micro</div><div class="message-text">{msg["content"]}</div></div>', unsafe_allow_html=True)
+        elif msg["role"] == "user":
+            with st.container():
+                st.markdown(f'<div class="message user-message"><div class="message-text">{msg["content"]}</div></div>', unsafe_allow_html=True)
+
+    # === 用户输入 ===
+    prompt = st.chat_input("请在这里输入你的问题...")
+
+    if prompt:
+        # 添加用户消息
         st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.container():
+            st.markdown(f'<div class="message user-message"><div class="message-text">{prompt}</div></div>', unsafe_allow_html=True)
+
+        # 生成回复
+        with st.spinner("🤖 正在思考..."):
+            generated_text = sample_output(
+                prompt,
+                st.session_state.model,
+                st.session_state.tokenizer,
+                DEVICE,
+                MAX_NEW_TOKENS=max_new_tokens,
+                TEMPERATURE=temperature,
+                TOP_K=top_k
+            )
         
-        # 展示用户输入
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        # 添加助手回复
+        st.session_state.messages.append({"role": "assistant", "content": generated_text})
+        with st.container():
+            st.markdown(f'<div class="message"><div class="avatar">Micro</div><div class="message-text">{generated_text}</div></div>', unsafe_allow_html=True)
 
-        # 获取模型回答
-        with st.chat_message("assistant"):
-            with st.spinner("🤖 MicroGPT 正在思考..."):
-                # 构造用于传递给 sample_output 的 **当前完整对话上下文**
-                # ⚠️ 注意: sample_output 默认是单轮对话，如果需要多轮，
-                # 您需要修改 sample_output 使其接收并处理 st.session_state.messages
-                # 而不是自己构造 messages 列表。
-                
-                # 当前版本的 sample_output 仅接受一个 "prompt" 字符串。
-                # 简单起见，我们只把用户最新的 prompt 传入：
-                
-                # 确保 sample_output 函数可以处理您训练时的对话格式
-                generated_text = sample_output(
-                    prompt, 
-                    model, 
-                    tokenizer, 
-                    DEVICE,
-                    MAX_NEW_TOKENS=max_new_tokens,
-                    TEMPERATURE=temperature,
-                    TOP_K=top_k
-                )
+    # === 默认示例按钮（可选）===
+    if not st.session_state.messages[0]["content"].startswith("你好！我是一个大型语言模型"):
+        st.session_state.messages[0]["content"] = "你好！我是一个大型语言模型，能够生成各种文本，包括故事、诗歌、代码、文章等。我的目标是帮助你解决问题、提供信息、娱乐等。"
 
-            # 展示模型回答
-            st.markdown(generated_text)
-            
-            # 将模型回答添加到历史记录
-            st.session_state.messages.append({"role": "assistant", "content": generated_text})
+    # === 添加一个示例按钮（可选）===
+    if st.button("🎯 试试问我：'你有什么特长？'", key="example_button"):
+        st.session_state.messages.append({"role": "user", "content": "你有什么特长？"})
+        with st.container():
+            st.markdown(f'<div class="message user-message"><div class="message-text">你有什么特长？</div></div>', unsafe_allow_html=True)
+
+        with st.spinner("🤖 正在思考..."):
+            example_response = sample_output(
+                "你有什么特长？",
+                st.session_state.model,
+                st.session_state.tokenizer,
+                DEVICE,
+                MAX_NEW_TOKENS=128,
+                TEMPERATURE=0.8,
+                TOP_K=50
+            )
+        st.session_state.messages.append({"role": "assistant", "content": example_response})
+        with st.container():
+            st.markdown(f'<div class="message"><div class="avatar">Micro</div><div class="message-text">{example_response}</div></div>', unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)  # 关闭 chat-container
+
+    # === 底部提示 ===
+    st.markdown('<div class="footer">© 2025 MicroGPT | 内容由AI生成，请谨慎使用</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()

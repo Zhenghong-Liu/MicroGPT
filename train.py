@@ -93,9 +93,28 @@ optimizer = torch.optim.AdamW(micro_gpt.parameters(), lr=LEARNING_RATE, betas=(0
 
 
 
+# 🛠️ 关键改进 1: 学习率调度器
+# 总的优化步数 (考虑梯度累积)
+from torch.optim.lr_scheduler import CosineAnnealingLR # 导入调度器
+# 学习率 Warmup 步数
+WARMUP_STEPS = 500
+TOTAL_TRAIN_STEPS = (len(full_dataloader) * EPOCHS) // GA_STEPS
+# Cosine Annealing 调度器 (T_max 是周期，这里设为总步数)
+scheduler = CosineAnnealingLR(optimizer, T_max=TOTAL_TRAIN_STEPS - WARMUP_STEPS, eta_min=1e-6) 
+# Warmup 初始学习率
+WARMUP_START_LR = 1e-7
+
+
+
 #===============================================================
 # 训练模型******************************************************=
 # ==============================================================
+def get_lr_warmup(step, max_lr, start_lr, warmup_steps):
+    """计算 Warmup 阶段的学习率"""
+    if step < warmup_steps:
+        return start_lr + (max_lr - start_lr) * (step / warmup_steps)
+    return max_lr
+
 train_loss_history = []
 for epoch in range(EPOCHS):
     micro_gpt.train()
@@ -118,6 +137,19 @@ for epoch in range(EPOCHS):
         key_padding_mask = (input_ids == tokenizer.pad_token_id).bool()
 
 
+        # 🛠️ 关键改进 2: 学习率更新逻辑
+        # 1. Warmup 阶段
+        if ITER_STEP < WARMUP_STEPS:
+            lr = get_lr_warmup(ITER_STEP, LEARNING_RATE, WARMUP_START_LR, WARMUP_STEPS)
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr
+        
+        # 2. Cosine Annealing 阶段
+        elif ITER_STEP % GA_STEPS == 0:
+            # 只有在梯度更新时才调用 scheduler.step()
+            pass # 调度器将在 optimizer.step() 之后调用
+
+
         # ========================================================================================#
         # ================训练模型，计算损失=========================================================#
         # ========================================================================================#
@@ -137,14 +169,19 @@ for epoch in range(EPOCHS):
             torch.nn.utils.clip_grad_norm_(micro_gpt.parameters(), 1.0) # 梯度裁剪
             optimizer.step()
             optimizer.zero_grad()
+
+            # 3. 在 Cosine 阶段更新调度器
+            if ITER_STEP >= WARMUP_STEPS:
+                scheduler.step()
             train_loss_history.append(loss.item())
+            current_lr = optimizer.param_groups[0]['lr']
 
 
         # ========================================================================================#
         # ===============检查模型性能===============================================================#
         # ========================================================================================#
         iter_step += 1
-        if iter_step % 10000 == 0:
+        if iter_step % 2000 == 0:
             print(f"Epoch {epoch+1}, Iter {iter_step}, Loss: {total_loss/iter_step}")
 
             prompts = [
