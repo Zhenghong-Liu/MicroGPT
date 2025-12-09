@@ -1,7 +1,5 @@
 import torch
 
-
-
 # 生成输出
 def sample_output(prompt, model, tokenizer, device, MAX_NEW_TOKENS=100, TEMPERATURE=0.8, TOP_K = 50):
     tools = None
@@ -12,11 +10,9 @@ def sample_output(prompt, model, tokenizer, device, MAX_NEW_TOKENS=100, TEMPERAT
     prompt_text = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
-        add_generation_prompt=False,
+        add_generation_prompt=True, # 建议设置为 True，以便模型知道何时开始生成
         tools=tools
     )
-
-    # prompt_text += f"{tokenizer.bos_token}assistant\n"
     # 编码为 Token IDs
     input_ids = tokenizer.encode(prompt_text, return_tensors='pt').to(device)
     # 确定初始序列长度
@@ -28,7 +24,7 @@ def sample_output(prompt, model, tokenizer, device, MAX_NEW_TOKENS=100, TEMPERAT
         for _ in range(MAX_NEW_TOKENS):
             
             # 1. 模型前向传播：预测下一个 token
-            # 只传入当前完整的序列
+            # 注意: 如果序列过长，这里可能需要进行 K-V 缓存优化 (但在 MicroGPT 中先忽略)
             outputs = model(input_ids) 
             
             # 模型的输出 logits 形状是 [Batch Size, Seq Len, Vocab Size]
@@ -36,44 +32,32 @@ def sample_output(prompt, model, tokenizer, device, MAX_NEW_TOKENS=100, TEMPERAT
             next_token_logits = outputs[:, -1, :]
             
             # 2. 应用温度和 Top-K 采样
+            
             # 调整 logits (降温，增加随机性)
             if TEMPERATURE > 0:
                 next_token_logits = next_token_logits / TEMPERATURE
-                
+            
+            # --- 核心修复点: 标准 Top-K 过滤 ---
+            # 找到 Top-K 的值和索引
             v, i = torch.topk(next_token_logits, TOP_K)
             
-            # ⬇️ 修正点 1: 确保 torch.arange 在相同的设备上 ⬇️
-            # 创建一个与 next_token_logits 在同一设备上的张量
-            device = next_token_logits.device
-            vocab_indices = torch.arange(outputs.shape[-1], device=device)
+            # 创建一个与 next_token_logits 形状相同、填充负无穷的张量
+            # 只有 Top-K 的位置不会被屏蔽
+            filtered_logits = torch.full_like(next_token_logits, float('-inf'))
             
-            # 修正点 2: 使用正确的张量进行 isin 检查
-            # i 已经是 [Batch_size, TOP_K] 形状
+            # 使用 scatter_() 将 Top-K 的值 (v) 散布到新的张量 (filtered_logits) 的对应位置 (i)
+            filtered_logits = filtered_logits.scatter_(dim=-1, index=i, src=v)
             
-            # ⚠️ 注意: next_token_logits 的形状是 [1, Vocab Size]。i 的形状是 [1, TOP_K]。
-            # isin 接受 [Vocab Size] 和 [TOP_K] 形状的张量
-            
-            # 将 i (top-k indices) 展平为一维向量，用于 isin 检查
-            top_k_indices = i.flatten() 
-
-            # 将不在 Top-K 范围内的 logits 设为负无穷
-            # torch.isin 检查 vocab_indices 中的元素是否在 top_k_indices 中
-            filter_mask = ~torch.isin(vocab_indices, top_k_indices)
-            
-            # 应用过滤（只针对批量中的第一个元素，因为 next_token_logits 是 [1, Vocab Size]）
-            next_token_logits[0, filter_mask] = float('-inf')
-
             # 3. 采样下一个 token ID
-            probs = torch.softmax(next_token_logits, dim=-1)
+            probs = torch.softmax(filtered_logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)
+            # ------------------------------------
             
             # 4. 检查停止条件
-            # 如果模型生成了 <EOS> 标记，则停止
             if next_token.item() == tokenizer.eos_token_id:
                 break
                 
             # 5. 更新输入序列
-            # 将新生成的 token 追加到 input_ids 中
             input_ids = torch.cat([input_ids, next_token], dim=-1)
 
     # 3. 解码输出
